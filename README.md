@@ -1,5 +1,9 @@
 # realtime-dual-transcriber
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-blue.svg)](CONTRIBUTING.md)
+[![Forks welcome](https://img.shields.io/badge/forks-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 realtime-dual-transcriber is a Windows desktop application for live transcription from two audio sources at the same time:
 
 - microphone input, shown as `You`
@@ -18,6 +22,34 @@ The application displays a real-time transcript in a desktop UI and can optional
 - Configurable fast/accurate transcription mode, language, prompt context, phrase timeout, audio filtering, and UI refresh
 - Secret-safe local configuration through `.env` or `keys.py`
 - Built-in unit tests for transcript state and API authentication handling
+
+## Open Source and Contributions
+
+This project is open source under the MIT License and welcomes forks, pull requests, bug reports, and documentation improvements.
+
+Start contributing:
+
+1. Fork this repository.
+2. Create a branch from `main`.
+3. Make a focused change.
+4. Run the tests.
+5. Open a pull request.
+
+```powershell
+git clone https://github.com/YOUR_USERNAME/realtime-dual-transcriber.git
+cd realtime-dual-transcriber
+git checkout -b feature/your-change
+```
+
+Helpful links:
+
+- [Contribution guide](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- [Bug report template](.github/ISSUE_TEMPLATE/bug_report.md)
+- [Feature request template](.github/ISSUE_TEMPLATE/feature_request.md)
+
+Good first contributions include Windows setup improvements, UI polish, transcript-state tests, provider configuration examples, and safer defaults for noisy audio environments.
 
 ## Repository
 
@@ -243,7 +275,11 @@ stateDiagram-v2
 |-- main.py                       # Desktop UI entry point
 |-- custom_speech_recognition/    # Speech recognition compatibility layer
 |-- tests/                        # Unit tests
+|-- .github/                      # GitHub Actions and contribution templates
 |-- .env.example                  # Environment variable template
+|-- CONTRIBUTING.md               # Contributor onboarding guide
+|-- CODE_OF_CONDUCT.md            # Community behavior expectations
+|-- LICENSE                       # MIT License
 |-- keys.example.py               # Python credential template
 |-- requirements.txt              # Python dependencies
 `-- README.md                     # Project documentation
@@ -290,6 +326,14 @@ Translation runs when you click the `Selesai` button. While speaking, the active
 - Do not commit `.env`, `keys.py`, model files, recordings, or logs.
 - The repository includes a GitHub Actions secret scan for common API key patterns.
 - If a real API key was ever committed, revoke it immediately and create a new one.
+
+## Project Ownership
+
+realtime-dual-transcriber is an independent open-source project developed and maintained by `Diyoncrz18`.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 
 ## Maintainer
 

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contribution guide
+    url: https://github.com/Diyoncrz18/realtime-dual-transcriber/blob/main/CONTRIBUTING.md
+    about: Read setup, testing, and pull request guidance before contributing.
