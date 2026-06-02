@@ -86,7 +86,7 @@ def clear_context(transcriber, speaker_queue, mic_queue):
 def create_ui_components(root, transcriber, speaker_queue, mic_queue):
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("dark-blue")
-    root.title("Ecoute")
+    root.title("realtime-dual-transcriber")
     root.geometry("1040x680")
     root.minsize(760, 460)
 
@@ -103,7 +103,7 @@ def create_ui_components(root, transcriber, speaker_queue, mic_queue):
 
     header = ctk.CTkLabel(
         main_frame,
-        text="Ecoute Live Transcript",
+        text="realtime-dual-transcriber",
         font=("Segoe UI Semibold", 18),
         text_color="#f8fafc",
         anchor="w",

@@ -54,13 +54,13 @@ def get_config(name, default):
     return str(value)
 
 
-PHRASE_TIMEOUT = float(get_config("ECOUTE_PHRASE_TIMEOUT", "5.0"))
-MAX_PHRASES = int(get_config("ECOUTE_MAX_PHRASES", "12"))
-MIN_AUDIO_SECONDS = float(get_config("ECOUTE_MIN_AUDIO_SECONDS", "0.45"))
-MIN_AUDIO_RMS = int(get_config("ECOUTE_MIN_AUDIO_RMS", "120"))
+PHRASE_TIMEOUT = float(get_config("RTDT_PHRASE_TIMEOUT", "5.0"))
+MAX_PHRASES = int(get_config("RTDT_MAX_PHRASES", "12"))
+MIN_AUDIO_SECONDS = float(get_config("RTDT_MIN_AUDIO_SECONDS", "0.45"))
+MIN_AUDIO_RMS = int(get_config("RTDT_MIN_AUDIO_RMS", "120"))
 TRANSLATION_SILENCE_DELAY = max(
     PHRASE_TIMEOUT,
-    float(get_config("ECOUTE_TRANSLATION_SILENCE_DELAY", str(PHRASE_TIMEOUT))),
+    float(get_config("RTDT_TRANSLATION_SILENCE_DELAY", str(PHRASE_TIMEOUT))),
 )
 TRANSLATION_WAITING_TEXT = "⏳ Menunggu pembicara berhenti..."
 TRANSLATION_RUNNING_TEXT = "Menerjemahkan..."
@@ -85,7 +85,7 @@ class AudioTranscriber:
         self.transcript_data = {"You": [], "Speaker": []}
         self.transcript_changed_event = threading.Event()
         self.audio_model = model
-        self.debug = os.environ.get("ECOUTE_DEBUG", "0") == "1"
+        self.debug = os.environ.get("RTDT_DEBUG", "0") == "1"
         self.lock = threading.RLock()
         self.revision = 0
         self.next_transcript_id = 1

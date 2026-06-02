@@ -109,7 +109,7 @@ class APIWhisperTranscriber:
             "CUSTOM_API_TRANSCRIPTION_TEMPERATURE",
             default=0.0,
         )
-        self.translation_enabled = self._get_config("ECOUTE_ENABLE_TRANSLATION", default="1") != "0"
+        self.translation_enabled = self._get_config("RTDT_ENABLE_TRANSLATION", default="1") != "0"
         self.last_error = None
         self.last_error_time = 0
         self.api_available = True
@@ -282,7 +282,7 @@ class APIWhisperTranscriber:
         self.auth_error_logged = True
         print(
             "[ERROR] API key rejected by provider. "
-            "Update GROQ_API_KEY in .env or keys.py, then restart Ecoute. "
+            "Update GROQ_API_KEY in .env or keys.py, then restart realtime-dual-transcriber. "
             f"Provider response: {error}"
         )
 

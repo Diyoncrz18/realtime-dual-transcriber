@@ -1,151 +1,204 @@
+# realtime-dual-transcriber
 
-# 🎧 Ecoute
+realtime-dual-transcriber is a Windows desktop application for live transcription from two audio sources at the same time:
 
-Ecoute is a live transcription tool that provides real-time transcripts for both the user's microphone input (You) and the user's speakers output (Speaker) in a textbox.
+- microphone input, shown as `You`
+- system speaker output, shown as `Speaker`
 
-## Sponsored By: Recall.ai - Meeting Transcription API
+The application displays a real-time transcript in a desktop UI and can optionally use an OpenAI-compatible API provider such as Groq for faster multilingual transcription and Indonesian translation.
 
-If you’re working with speech detection or transcription for meetings, consider checking out [Recall.ai](https://www.recall.ai/product/meeting-transcription-api/?utm_source=github&utm_medium=sponsorship&utm_campaign=sevask-ecoute), an API that works with Zoom, Google Meet, Microsoft Teams, and more. Recall.ai diarizes by pulling the speaker data and separate audio streams from the meeting platforms, which means 100% accurate speaker diarization with actual speaker names and speaker emails.
+## Key Features
 
-## 📖 Demo
+- Dual-source transcription for microphone and speaker audio
+- Desktop interface built with CustomTkinter
+- WASAPI loopback support for capturing default speaker output on Windows
+- Local transcription mode with Faster Whisper
+- API transcription mode with Groq or another OpenAI-compatible endpoint
+- Optional Indonesian translation for each finalized transcript block
+- Configurable silence delay, phrase timeout, audio filtering, and transcription model
+- Secret-safe local configuration through `.env` or `keys.py`
+- Built-in unit tests for transcript state and API authentication handling
 
-https://github.com/user-attachments/assets/5616421f-838d-439f-8b15-0df7b8d33459
+## Repository
 
-Ecoute is designed to help users in their conversations by providing live transcriptions.
-
-## 🚀 Getting Started
-
-Follow these steps to set up and run Ecoute on your local machine.
-
-### 📋 Prerequisites
-
-- Python >=3.8.0
-- (Optional) An OpenAI API key that can access Whisper API (set up a paid account OpenAI account)
-- Windows OS (Not tested on others)
-- FFmpeg 
-
-If FFmpeg is not installed in your system, you can follow the steps below to install it.
-
-First, you need to install Chocolatey, a package manager for Windows. Open your PowerShell as Administrator and run the following command:
+```powershell
+git clone https://github.com/Diyoncrz18/realtime-dual-transcriber.git
+cd realtime-dual-transcriber
 ```
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-```
-Once Chocolatey is installed, you can install FFmpeg by running the following command in your PowerShell:
-```
+
+## Requirements
+
+- Windows 10 or Windows 11
+- Python 3.8 or newer
+- FFmpeg available on `PATH`
+- Working microphone and default speaker device
+- Optional: Groq or OpenAI-compatible API key for API mode
+
+Install FFmpeg with Chocolatey:
+
+```powershell
 choco install ffmpeg
 ```
-Please ensure that you run these commands in a PowerShell window with administrator privileges. If you face any issues during the installation, you can visit the official Chocolatey and FFmpeg websites for troubleshooting.
 
-### 🔧 Installation
+Or install FFmpeg manually and make sure `ffmpeg.exe` is available from PowerShell:
 
-1. Clone the repository:
-
-   ```
-   git clone https://github.com/SevaSk/ecoute
-   ```
-
-2. Navigate to the `ecoute` folder:
-
-   ```
-   cd ecoute
-   ```
-
-3. Install the required packages:
-
-   ```
-   pip install -r requirements.txt
-   ```
-   
-4. (Optional) Configure API credentials locally.
-
-   The safest option is to copy the example environment file and add your real API key to `.env`:
-
-   ```
-   Copy-Item .env.example .env
-   ```
-
-   Example Groq setup:
-
-   ```
-   GROQ_API_KEY=your-groq-api-key-here
-   GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
-   GROQ_TRANSLATION_MODEL=llama-3.1-8b-instant
-   ```
-
-   Example OpenAI-compatible setup:
-
-   ```
-   OPENAI_API_KEY=your-openai-api-key-here
-   OPENAI_BASE_URL=https://your-custom-api.example/v1
-   OPENAI_TRANSCRIPTION_MODEL=whisper-1
-   ```
-
-   You can also use `CUSTOM_API_KEY`, `CUSTOM_API_URL`, and `CUSTOM_API_TRANSCRIPTION_MODEL` with the same values.
-
-   If you prefer Python config, copy `keys.example.py` to `keys.py` and put your real values there.
-   Do not commit `.env` or `keys.py`; both files are ignored by `.gitignore`.
-
-   If you see `Invalid API Key` or `expired_api_key`, create a new provider key and replace the old value in `.env` or `keys.py`, then restart Ecoute.
-
-   Optional tuning:
-
-      ```
-      GROQ_TRANSCRIPTION_MODEL=whisper-large-v3
-      GROQ_TRANSCRIPTION_LANGUAGE=id
-      GROQ_TRANSCRIPTION_TEMPERATURE=0
-      GROQ_TRANSCRIPTION_PROMPT=Conversation with technical terms and product names.
-      ```
-
-   Use `whisper-large-v3-turbo` for lower latency, or `whisper-large-v3` when accuracy matters more.
-
-   A new transcript block is created only after a mic or speaker segment has been quiet for about 5 seconds. Tune that delay with:
-
-      ```
-      ECOUTE_RECORD_TIMEOUT=1.4
-      ECOUTE_PHRASE_TIMEOUT=5.0
-      ECOUTE_TRANSLATION_SILENCE_DELAY=5.0
-      ```
-
-### 🎬 Running Ecoute
-
-Run the main script:
-
-```
-python main.py
+```powershell
+ffmpeg -version
 ```
 
-For a more better and faster version that also works with most languages, use:
+## Installation
 
-```
-python main.py --api
-```
+Create and activate a virtual environment:
 
-Upon initiation, Ecoute will begin transcribing your microphone input and speaker output in real-time. Please note that it might take a few seconds for the system to warm up before the transcription becomes real-time.
-
-The --api flag will use the whisper api for transcriptions. This significantly enhances transcription speed and accuracy, and it works in most languages (rather than just English without the flag). It's expected to become the default option in future releases. However, keep in mind that using the Whisper API will consume more OpenAI credits than using the local model. This increased cost is attributed to the advanced features and capabilities that the Whisper API provides. Despite the additional expense, the substantial improvements in speed and transcription accuracy may make it a worthwhile investment for your use case.
-
-### ✅ Testing
-
-Run the unit tests with:
-
-```
-python -m unittest discover -s tests
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
-### ⚠️ Limitations
+Install dependencies:
 
-While Ecoute provides real-time transcription and response suggestions, there are several known limitations to its functionality that you should be aware of:
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-**Default Mic and Speaker:** Ecoute is currently configured to listen only to the default microphone and speaker set in your system. It will not detect sound from other devices or systems. If you wish to use a different mic or speaker, you will need to set it as your default device in your system settings.
+## Configuration
 
-**Whisper Model**: If the --api flag is not used, we utilize the 'tiny' version of the Whisper ASR model, due to its low resource consumption and fast response times. However, this model may not be as accurate as the larger models in transcribing certain types of speech, including accents or uncommon words.
+The recommended configuration method is `.env`.
 
-**Language**: If you are not using the --api flag the Whisper model used in Ecoute is set to English. As a result, it may not accurately transcribe non-English languages or dialects. We are actively working to add multi-language support to future versions of the program.
+```powershell
+Copy-Item .env.example .env
+```
 
-## 📖 License
+Edit `.env` and replace placeholder values with your own credentials.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Groq example:
 
-## 🤝 Contributing
+```env
+GROQ_API_KEY=your-groq-api-key-here
+GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
+GROQ_TRANSLATION_MODEL=llama-3.1-8b-instant
+```
 
-Contributions are welcome! Feel free to open issues or submit pull requests to improve Ecoute.
+OpenAI-compatible endpoint example:
+
+```env
+OPENAI_API_KEY=your-openai-compatible-api-key
+OPENAI_BASE_URL=https://your-provider.example/v1
+OPENAI_TRANSCRIPTION_MODEL=whisper-1
+```
+
+You can also configure credentials through `keys.py`:
+
+```powershell
+Copy-Item keys.example.py keys.py
+```
+
+Keep real credentials local. `.env` and `keys.py` are ignored by Git and should never be committed.
+
+## Runtime Tuning
+
+These values are optional and can be added to `.env` when needed:
+
+```env
+GROQ_TRANSCRIPTION_LANGUAGE=id
+GROQ_TRANSCRIPTION_TEMPERATURE=0
+GROQ_TRANSCRIPTION_PROMPT=Conversation with technical terms and product names.
+
+RTDT_RECORD_TIMEOUT=1.4
+RTDT_PHRASE_TIMEOUT=5.0
+RTDT_PAUSE_THRESHOLD=0.65
+RTDT_MIN_AUDIO_SECONDS=0.45
+RTDT_MIN_AUDIO_RMS=120
+RTDT_TRANSLATION_SILENCE_DELAY=5.0
+```
+
+Model recommendation:
+
+- `whisper-large-v3-turbo` for lower latency
+- `whisper-large-v3` for higher accuracy
+
+## Running the Application
+
+Run local transcription mode:
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+Run API transcription mode:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --api
+```
+
+API mode is recommended when you need better multilingual support, faster transcription, and Indonesian translation.
+
+## How It Works
+
+1. `AudioRecorder.py` captures microphone audio and default speaker loopback audio.
+2. `AudioTranscriber.py` filters short or silent audio, merges phrase fragments, and manages transcript state.
+3. `TranscriberModels.py` routes transcription to either Faster Whisper or an OpenAI-compatible API provider.
+4. `main.py` renders the live transcript UI and refreshes it as transcript revisions change.
+
+## Project Structure
+
+```text
+.
+|-- AudioRecorder.py              # Microphone and speaker recording
+|-- AudioTranscriber.py           # Transcript state, merging, filtering, translation queue
+|-- TranscriberModels.py          # Local and API transcription providers
+|-- main.py                       # Desktop UI entry point
+|-- custom_speech_recognition/    # Speech recognition compatibility layer
+|-- tests/                        # Unit tests
+|-- .env.example                  # Environment variable template
+|-- keys.example.py               # Python credential template
+|-- requirements.txt              # Python dependencies
+`-- README.md                     # Project documentation
+```
+
+## Testing
+
+Run the unit test suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
+Compile-check the main Python files:
+
+```powershell
+.\.venv\Scripts\python.exe -m py_compile main.py AudioRecorder.py AudioTranscriber.py TranscriberModels.py
+```
+
+## Troubleshooting
+
+### Invalid or expired API key
+
+If the terminal shows `Invalid API Key` or `expired_api_key`, create a new provider key, update `.env` or `keys.py`, and restart the application.
+
+### FFmpeg not found
+
+Make sure FFmpeg is installed and available from PowerShell:
+
+```powershell
+ffmpeg -version
+```
+
+### Speaker audio is not captured
+
+The application captures the default Windows speaker output through WASAPI loopback. Set the target output device as the Windows default speaker before starting the app.
+
+### Transcription is delayed
+
+Transcript blocks are finalized after a silence delay. Lower `RTDT_TRANSLATION_SILENCE_DELAY` and `RTDT_PHRASE_TIMEOUT` for faster updates, or increase them for more stable sentence grouping.
+
+## Security Notes
+
+- Do not commit `.env`, `keys.py`, model files, recordings, or logs.
+- The repository includes a GitHub Actions secret scan for common API key patterns.
+- If a real API key was ever committed, revoke it immediately and create a new one.
+
+## Maintainer
+
+Maintained by `Diyoncrz18`.
