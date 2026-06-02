@@ -44,6 +44,11 @@ class APIWhisperTranscriberTests(unittest.TestCase):
         self.assertFalse(transcriber.api_available)
         self.assertEqual(output.getvalue().count("API key rejected by provider"), 1)
 
+    def test_transcription_mode_selects_groq_whisper_model(self):
+        self.assertEqual(APIWhisperTranscriber._model_for_mode("fast"), "whisper-large-v3-turbo")
+        self.assertEqual(APIWhisperTranscriber._model_for_mode("accurate"), "whisper-large-v3")
+        self.assertEqual(APIWhisperTranscriber._model_for_mode("quality"), "whisper-large-v3")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,12 +46,12 @@ def get_config(name, default):
     return str(value)
 
 
-RECORD_TIMEOUT = float(get_config("RTDT_RECORD_TIMEOUT", "1.4"))
-ENERGY_THRESHOLD = int(get_config("RTDT_ENERGY_THRESHOLD", "300"))
+RECORD_TIMEOUT = float(get_config("RTDT_RECORD_TIMEOUT", "1.0"))
+ENERGY_THRESHOLD = int(get_config("RTDT_ENERGY_THRESHOLD", "250"))
 DYNAMIC_ENERGY_THRESHOLD = get_config("RTDT_DYNAMIC_ENERGY_THRESHOLD", "1") != "0"
-PAUSE_THRESHOLD = float(get_config("RTDT_PAUSE_THRESHOLD", "0.65"))
+PAUSE_THRESHOLD = float(get_config("RTDT_PAUSE_THRESHOLD", "0.50"))
 PHRASE_THRESHOLD = float(get_config("RTDT_PHRASE_THRESHOLD_SECONDS", "0.25"))
-NON_SPEAKING_DURATION = float(get_config("RTDT_NON_SPEAKING_DURATION", "0.35"))
+NON_SPEAKING_DURATION = float(get_config("RTDT_NON_SPEAKING_DURATION", "0.25"))
 NOISE_ADJUST_SECONDS = float(get_config("RTDT_NOISE_ADJUST_SECONDS", "0.6"))
 
 

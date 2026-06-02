@@ -13,74 +13,131 @@ import TranscriberModels
 from AudioTranscriber import AudioTranscriber
 
 
-def configure_textbox_tags(textbox):
-    tags = {
-        "you": {"foreground": "#7dd3fc", "font": ("Segoe UI Semibold", 15)},
-        "speaker": {"foreground": "#fbbf24", "font": ("Segoe UI Semibold", 15)},
-        "timestamp": {"foreground": "#94a3b8", "font": ("Segoe UI", 12)},
-        "heading": {"foreground": "#cbd5e1", "font": ("Segoe UI Semibold", 13)},
-        "original": {"foreground": "#f8fafc", "font": ("Segoe UI", 17)},
-        "translation": {"foreground": "#bbf7d0", "font": ("Segoe UI", 16)},
-        "pending": {"foreground": "#94a3b8", "font": ("Segoe UI Italic", 15)},
-        "spacer": {"font": ("Segoe UI", 6)},
-    }
-    target = getattr(textbox, "_textbox", textbox)
-    for tag, options in tags.items():
-        try:
-            target.tag_config(tag, **options)
-        except Exception:
-            pass
+UI_REFRESH_MS = int(AudioRecorder.get_config("RTDT_UI_REFRESH_MS", "150"))
 
 
-def insert_tagged(textbox, text, tag):
-    try:
-        textbox.insert("end", text, tag)
-    except TypeError:
-        textbox.insert("end", text)
+def set_textbox_text(textbox, text):
+    text = text or ""
+    current = textbox.get("1.0", "end-1c")
+    if current == text:
+        return
 
-
-def render_transcript(textbox, entries):
     textbox.configure(state="normal")
     textbox.delete("1.0", "end")
-
-    for entry in entries:
-        speaker_tag = "you" if entry["speaker"] == "You" else "speaker"
-        speaker_label = "[YOU / MIC]" if entry["speaker"] == "You" else "[SPEAKER]"
-        timestamp = entry["timestamp"].strftime("%H:%M:%S")
-        translation = entry.get("translation") or entry["original"]
-        translation_tag = "pending" if entry.get("translation_pending") else "translation"
-
-        insert_tagged(textbox, speaker_label, speaker_tag)
-        insert_tagged(textbox, f"  {timestamp}\n", "timestamp")
-        insert_tagged(textbox, "Original:\n", "heading")
-        insert_tagged(textbox, f"{entry['original']}\n\n", "original")
-        insert_tagged(textbox, "Terjemahan:\n", "heading")
-        insert_tagged(textbox, f"{translation}\n\n", translation_tag)
-        insert_tagged(textbox, "\n", "spacer")
-
-    textbox.see("end")
+    textbox.insert("1.0", text)
     textbox.configure(state="disabled")
 
 
-def update_transcript_UI(transcriber, textbox, last_revision=None):
-    if last_revision is None:
-        last_revision = {"value": -1}
+def render_transcript_view(widgets, entries, current_index):
+    total = len(entries)
+    if total == 0:
+        widgets["speaker_label"].configure(text="BELUM ADA TRANSCRIPT", text_color="#94a3b8")
+        widgets["time_label"].configure(text="--:--:--")
+        widgets["status_label"].configure(text="Menunggu suara masuk", text_color="#94a3b8")
+        widgets["counter_label"].configure(text="0 / 0")
+        set_textbox_text(widgets["original_textbox"], "Mulai bicara untuk membuat transcript pertama.")
+        widgets["translation_textbox"].configure(text_color="#94a3b8")
+        set_textbox_text(widgets["translation_textbox"], "")
+        widgets["previous_button"].configure(state="disabled")
+        widgets["next_button"].configure(state="disabled")
+        widgets["finish_button"].configure(state="disabled")
+        return
 
+    current_index = max(0, min(current_index, total - 1))
+    active_transcript = entries[current_index]
+    is_you = active_transcript["speaker"] == "You"
+    speaker_label = "YOU / MIC" if is_you else "SPEAKER"
+    speaker_color = "#38bdf8" if is_you else "#a78bfa"
+    status = active_transcript.get("status") or "Teks siap diterjemahkan"
+    status_colors = {
+        "Sedang berbicara": "#fbbf24",
+        "Sedang memproses teks": "#fbbf24",
+        "Teks siap diterjemahkan": "#93c5fd",
+        "Menerjemahkan": "#fbbf24",
+        "Selesai": "#86efac",
+    }
+    if status == "Sedang berbicara":
+        status_text = f"[{speaker_label}] sedang berbicara..."
+    elif status == "Sedang memproses teks":
+        status_text = "Sedang memproses teks..."
+    else:
+        status_text = status
+    translation = active_transcript.get("translation") or ""
+    original = active_transcript.get("original", "")
+
+    widgets["speaker_label"].configure(text=speaker_label, text_color=speaker_color)
+    widgets["time_label"].configure(text=active_transcript["timestamp"].strftime("%H:%M:%S"))
+    widgets["status_label"].configure(text=status_text, text_color=status_colors.get(status, "#94a3b8"))
+    widgets["counter_label"].configure(text=f"{current_index + 1} / {total}")
+    set_textbox_text(widgets["original_textbox"], original or "Mendengarkan audio...")
+    widgets["translation_textbox"].configure(
+        text_color="#94a3b8" if active_transcript.get("translation_pending") else "#bbf7d0"
+    )
+    set_textbox_text(widgets["translation_textbox"], translation)
+
+    widgets["previous_button"].configure(state="normal" if current_index > 0 else "disabled")
+    widgets["next_button"].configure(state="normal" if current_index < total - 1 else "disabled")
+    can_finish = bool(original.strip()) and status not in {"Sedang memproses teks", "Menerjemahkan", "Selesai"}
+    widgets["finish_button"].configure(state="normal" if can_finish else "disabled")
+
+
+def update_transcript_UI(transcriber, widgets, state):
     revision = transcriber.get_revision()
-    if revision != last_revision["value"]:
-        render_transcript(textbox, transcriber.get_entries())
-        last_revision["value"] = revision
+    if revision != state["last_revision"]:
+        entries = transcriber.get_entries()
+        if not entries:
+            state["current_index"] = 0
+        elif state["current_index"] >= len(entries):
+            state["current_index"] = len(entries) - 1
+        render_transcript_view(widgets, entries, state["current_index"])
+        state["last_revision"] = revision
 
-    textbox.after(250, update_transcript_UI, transcriber, textbox, last_revision)
+    widgets["container"].after(UI_REFRESH_MS, update_transcript_UI, transcriber, widgets, state)
 
 
-def clear_context(transcriber, speaker_queue, mic_queue):
+def handle_previous(transcriber, widgets, state):
+    if state["current_index"] <= 0:
+        return
+
+    state["current_index"] -= 1
+    render_transcript_view(widgets, transcriber.get_entries(), state["current_index"])
+
+
+def handle_next(transcriber, widgets, state):
+    entries = transcriber.get_entries()
+    if state["current_index"] >= len(entries) - 1:
+        return
+
+    state["current_index"] += 1
+    render_transcript_view(widgets, entries, state["current_index"])
+
+
+def handle_finish(transcriber, widgets, state):
+    entries = transcriber.get_entries()
+    if not entries:
+        render_transcript_view(widgets, entries, state["current_index"])
+        return
+
+    current_index = max(0, min(state["current_index"], len(entries) - 1))
+    state["current_index"] = current_index
+    active_transcript = entries[current_index]
+    transcriber.finish_entry(active_transcript["id"])
+    render_transcript_view(widgets, transcriber.get_entries(), state["current_index"])
+
+
+def clear_context(transcriber, speaker_queue, mic_queue, widgets=None, state=None):
     transcriber.clear_transcript_data()
 
     with speaker_queue.mutex:
         speaker_queue.queue.clear()
     with mic_queue.mutex:
         mic_queue.queue.clear()
+
+    if state is not None:
+        state["current_index"] = 0
+        state["last_revision"] = -1
+    if widgets is not None:
+        render_transcript_view(widgets, [], 0)
 
 
 def create_ui_components(root, transcriber, speaker_queue, mic_queue):
@@ -93,9 +150,10 @@ def create_ui_components(root, transcriber, speaker_queue, mic_queue):
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(0, weight=1)
 
-    main_frame = ctk.CTkFrame(root, fg_color="#101820", corner_radius=8)
-    main_frame.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+    state = {"current_index": 0, "last_revision": -1}
 
+    main_frame = ctk.CTkFrame(root, fg_color="#0f172a", corner_radius=0)
+    main_frame.grid(row=0, column=0, sticky="nsew")
     main_frame.grid_columnconfigure(0, weight=1)
     main_frame.grid_rowconfigure(0, weight=0)
     main_frame.grid_rowconfigure(1, weight=1)
@@ -106,36 +164,170 @@ def create_ui_components(root, transcriber, speaker_queue, mic_queue):
         text="realtime-dual-transcriber",
         font=("Segoe UI Semibold", 18),
         text_color="#f8fafc",
+        anchor="center",
+    )
+    header.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 8))
+
+    card = ctk.CTkFrame(main_frame, fg_color="#111827", border_width=1, border_color="#263244", corner_radius=10)
+    card.grid(row=1, column=0, sticky="nsew", padx=18, pady=10)
+    card.grid_columnconfigure(0, weight=1)
+    card.grid_rowconfigure(0, weight=0)
+    card.grid_rowconfigure(1, weight=0)
+    card.grid_rowconfigure(2, weight=0)
+    card.grid_rowconfigure(3, weight=0)
+    card.grid_rowconfigure(4, weight=1)
+    card.grid_rowconfigure(5, weight=0)
+    card.grid_rowconfigure(6, weight=1)
+
+    meta_frame = ctk.CTkFrame(card, fg_color="transparent")
+    meta_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(18, 4))
+    meta_frame.grid_columnconfigure(0, weight=1)
+    meta_frame.grid_columnconfigure(1, weight=0)
+
+    speaker_label = ctk.CTkLabel(
+        meta_frame,
+        text="BELUM ADA TRANSCRIPT",
+        font=("Segoe UI Semibold", 20),
+        text_color="#94a3b8",
         anchor="w",
     )
-    header.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 4))
+    speaker_label.grid(row=0, column=0, sticky="ew")
 
-    transcript_textbox = ctk.CTkTextbox(
-        main_frame,
+    counter_label = ctk.CTkLabel(
+        meta_frame,
+        text="0 / 0",
+        font=("Segoe UI", 13),
+        text_color="#94a3b8",
+    )
+    counter_label.grid(row=0, column=1, sticky="e", padx=(12, 0))
+
+    time_label = ctk.CTkLabel(
+        card,
+        text="--:--:--",
+        font=("Segoe UI", 13),
+        text_color="#94a3b8",
+        anchor="w",
+    )
+    time_label.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 14))
+
+    status_label = ctk.CTkLabel(
+        card,
+        text="Menunggu suara masuk",
+        font=("Segoe UI Semibold", 14),
+        text_color="#94a3b8",
+        anchor="w",
+    )
+    status_label.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 16))
+
+    original_label = ctk.CTkLabel(
+        card,
+        text="Original",
+        font=("Segoe UI Semibold", 14),
+        text_color="#cbd5e1",
+        anchor="w",
+    )
+    original_label.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 6))
+
+    original_textbox = ctk.CTkTextbox(
+        card,
         font=("Segoe UI", 17),
         text_color="#f8fafc",
-        fg_color="#0b1117",
+        fg_color="#0b1120",
         border_width=1,
-        border_color="#243447",
+        border_color="#263244",
         wrap="word",
-        spacing1=4,
-        spacing2=2,
-        spacing3=8,
     )
-    transcript_textbox.grid(row=1, column=0, sticky="nsew", padx=14, pady=10)
-    configure_textbox_tags(transcript_textbox)
-    transcript_textbox.configure(state="disabled")
+    original_textbox.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 14))
 
-    clear_button = ctk.CTkButton(
-        main_frame,
-        text="Clear Transcript",
-        command=lambda: clear_context(transcriber, speaker_queue, mic_queue),
-        height=36,
+    translation_label = ctk.CTkLabel(
+        card,
+        text="Terjemahan",
+        font=("Segoe UI Semibold", 14),
+        text_color="#cbd5e1",
+        anchor="w",
+    )
+    translation_label.grid(row=5, column=0, sticky="ew", padx=20, pady=(0, 6))
+
+    translation_textbox = ctk.CTkTextbox(
+        card,
+        font=("Segoe UI", 16),
+        text_color="#bbf7d0",
+        fg_color="#07140f",
+        border_width=1,
+        border_color="#1f3d32",
+        wrap="word",
+    )
+    translation_textbox.grid(row=6, column=0, sticky="nsew", padx=20, pady=(0, 20))
+    original_textbox.configure(state="disabled")
+    translation_textbox.configure(state="disabled")
+
+    footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+    footer_frame.grid(row=2, column=0, sticky="ew", padx=18, pady=(4, 18))
+    footer_frame.grid_columnconfigure(0, weight=1)
+    footer_frame.grid_columnconfigure(1, weight=1)
+    footer_frame.grid_columnconfigure(2, weight=1)
+    footer_frame.grid_columnconfigure(3, weight=1)
+
+    widgets = {
+        "container": main_frame,
+        "speaker_label": speaker_label,
+        "time_label": time_label,
+        "status_label": status_label,
+        "counter_label": counter_label,
+        "original_textbox": original_textbox,
+        "translation_textbox": translation_textbox,
+    }
+
+    previous_button = ctk.CTkButton(
+        footer_frame,
+        text="Previous",
+        command=lambda: handle_previous(transcriber, widgets, state),
+        height=38,
         corner_radius=6,
     )
-    clear_button.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
+    previous_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
 
-    return transcript_textbox
+    next_button = ctk.CTkButton(
+        footer_frame,
+        text="Next",
+        command=lambda: handle_next(transcriber, widgets, state),
+        height=38,
+        corner_radius=6,
+    )
+    next_button.grid(row=0, column=1, sticky="ew", padx=6)
+
+    finish_button = ctk.CTkButton(
+        footer_frame,
+        text="Selesai",
+        command=lambda: handle_finish(transcriber, widgets, state),
+        height=38,
+        corner_radius=6,
+        fg_color="#15803d",
+        hover_color="#166534",
+    )
+    finish_button.grid(row=0, column=2, sticky="ew", padx=6)
+
+    clear_button = ctk.CTkButton(
+        footer_frame,
+        text="Clear Transcript",
+        command=lambda: clear_context(transcriber, speaker_queue, mic_queue, widgets, state),
+        height=38,
+        corner_radius=6,
+    )
+    clear_button.grid(row=0, column=3, sticky="ew", padx=(6, 0))
+
+    widgets.update(
+        {
+            "previous_button": previous_button,
+            "next_button": next_button,
+            "finish_button": finish_button,
+            "clear_button": clear_button,
+        }
+    )
+
+    render_transcript_view(widgets, [], 0)
+
+    return widgets, state
 
 
 def find_ffmpeg():
@@ -182,11 +374,11 @@ def main():
     transcribe.daemon = True
     transcribe.start()
 
-    transcript_textbox = create_ui_components(root, transcriber, speaker_queue, mic_queue)
+    transcript_widgets, transcript_state = create_ui_components(root, transcriber, speaker_queue, mic_queue)
 
     print("READY")
 
-    update_transcript_UI(transcriber, transcript_textbox)
+    update_transcript_UI(transcriber, transcript_widgets, transcript_state)
 
     root.mainloop()
 

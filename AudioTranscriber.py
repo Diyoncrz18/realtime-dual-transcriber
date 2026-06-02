@@ -54,17 +54,26 @@ def get_config(name, default):
     return str(value)
 
 
-PHRASE_TIMEOUT = float(get_config("RTDT_PHRASE_TIMEOUT", "5.0"))
+PHRASE_TIMEOUT = float(get_config("RTDT_PHRASE_TIMEOUT", "3.0"))
 MAX_PHRASES = int(get_config("RTDT_MAX_PHRASES", "12"))
-MIN_AUDIO_SECONDS = float(get_config("RTDT_MIN_AUDIO_SECONDS", "0.45"))
+MIN_AUDIO_SECONDS = float(get_config("RTDT_MIN_AUDIO_SECONDS", "0.30"))
 MIN_AUDIO_RMS = int(get_config("RTDT_MIN_AUDIO_RMS", "120"))
+MIN_MIC_AUDIO_RMS = int(get_config("RTDT_MIN_MIC_RMS", str(MIN_AUDIO_RMS)))
+MIN_SPEAKER_AUDIO_RMS = int(get_config("RTDT_MIN_SPEAKER_RMS", "90"))
 TRANSLATION_SILENCE_DELAY = max(
     PHRASE_TIMEOUT,
     float(get_config("RTDT_TRANSLATION_SILENCE_DELAY", str(PHRASE_TIMEOUT))),
 )
-TRANSLATION_WAITING_TEXT = "⏳ Menunggu pembicara berhenti..."
+TRANSLATION_WAITING_TEXT = "Klik Selesai untuk menerjemahkan."
 TRANSLATION_RUNNING_TEXT = "Menerjemahkan..."
 TRANSLATION_PENDING_TEXT = TRANSLATION_WAITING_TEXT
+SPEAKING_STATUS_SECONDS = float(get_config("RTDT_SPEAKING_STATUS_SECONDS", "1.2"))
+PROCESSING_STATUS_DELAY = float(get_config("RTDT_PROCESSING_STATUS_DELAY", "0.15"))
+TRANSCRIPTION_LOOP_SLEEP = float(get_config("RTDT_TRANSCRIPTION_LOOP_SLEEP", "0.05"))
+PRIORITIZE_SPEAKER_AUDIO = get_config("RTDT_PRIORITIZE_SPEAKER", "1") != "0"
+ENABLE_AUDIO_NORMALIZATION = get_config("RTDT_ENABLE_AUDIO_NORMALIZATION", "1") != "0"
+TARGET_AUDIO_RMS = int(get_config("RTDT_TARGET_AUDIO_RMS", "800"))
+MAX_AUDIO_GAIN = float(get_config("RTDT_MAX_AUDIO_GAIN", "3.0"))
 NOISE_TEXTS = {
     "uh",
     "um",
@@ -133,21 +142,25 @@ class AudioTranscriber:
             processing_sources = []
             mic_data = self._drain_audio_queue("You", mic_queue)
             speaker_data = self._drain_audio_queue("Speaker", speaker_queue)
+            source_batches = (
+                [("Speaker", speaker_data), ("You", mic_data)]
+                if PRIORITIZE_SPEAKER_AUDIO
+                else [("You", mic_data), ("Speaker", speaker_data)]
+            )
 
             try:
-                if mic_data:
-                    processing_sources.append("You")
-                    self._set_segment_transcribing("You", True)
-                    transcription = self._transcribe_source("You", mic_data)
-                    if transcription:
-                        pending_transcriptions.append(transcription)
+                for who_spoke, audio_data in source_batches:
+                    if not audio_data:
+                        continue
 
-                if speaker_data:
-                    processing_sources.append("Speaker")
-                    self._set_segment_transcribing("Speaker", True)
-                    transcription = self._transcribe_source("Speaker", speaker_data)
+                    processing_sources.append(who_spoke)
+                    latest_time = max(time for _, time in audio_data)
+                    self._set_segment_transcribing(who_spoke, True, latest_time)
+                    transcription = self._transcribe_source(who_spoke, audio_data)
                     if transcription:
                         pending_transcriptions.append(transcription)
+                    else:
+                        self._discard_empty_active_entry(who_spoke)
 
                 if pending_transcriptions:
                     pending_transcriptions.sort(key=lambda x: x[2])
@@ -157,7 +170,7 @@ class AudioTranscriber:
                 for who_spoke in processing_sources:
                     self._set_segment_transcribing(who_spoke, False)
 
-            threading.Event().wait(0.1)
+            threading.Event().wait(TRANSCRIPTION_LOOP_SLEEP)
 
     def _drain_audio_queue(self, who_spoke, audio_queue):
         audio_data = []
@@ -185,7 +198,8 @@ class AudioTranscriber:
         try:
             fd, path = tempfile.mkstemp(suffix=".wav")
             os.close(fd)
-            source_info["process_data_func"](sample, path)
+            prepared_sample = self._prepare_audio_sample(who_spoke, sample)
+            source_info["process_data_func"](prepared_sample, path)
             text = self._normalize_text(self.audio_model.get_transcription(path))
             if text and text.lower() != "you":
                 latest_time = max(time for _, time in audio_data)
@@ -214,7 +228,7 @@ class AudioTranscriber:
         else:
             source_info["new_phrase"] = False
 
-        source_info["last_sample"] += data
+        source_info["last_sample"] = data
         source_info["last_spoken"] = time_spoken
         self.last_audio_activity[who_spoke] = time.monotonic()
 
@@ -243,25 +257,7 @@ class AudioTranscriber:
 
         with self.lock:
             segment = self.segment_state[who_spoke]
-            transcript = self.transcript_data[who_spoke]
-
-            entry = None
-            if segment["is_finalized"] or segment["active_card_id"] is None:
-                entry = self._new_entry(who_spoke, "", time_spoken)
-                transcript.append(entry)
-                segment["active_card_id"] = entry["id"]
-                segment["buffer"] = ""
-                segment["is_finalized"] = False
-                if len(transcript) > MAX_PHRASES:
-                    transcript.pop(0)
-            else:
-                entry = self._find_entry(segment["active_card_id"])
-                if entry is None:
-                    entry = self._new_entry(who_spoke, "", time_spoken)
-                    transcript.append(entry)
-                    segment["active_card_id"] = entry["id"]
-                    segment["buffer"] = ""
-                    segment["is_finalized"] = False
+            entry = self._ensure_active_entry_locked(who_spoke, time_spoken)
 
             merged_text = self._merge_transcript(segment["buffer"], text)
             visual_changed = (
@@ -286,13 +282,18 @@ class AudioTranscriber:
                 self.speaker_buffer = merged_text
             self.last_text_activity[who_spoke] = segment["last_activity"]
             self.audio_sources[who_spoke]["active_entry_id"] = segment["active_card_id"]
-            self._schedule_translation_timer_locked(who_spoke)
+            self._cancel_translation_timer_locked(who_spoke)
             if visual_changed:
                 self._bump_revision()
 
     def get_entries(self):
         with self.lock:
-            entries = [entry.copy() for entry in self.transcript_data["You"] + self.transcript_data["Speaker"]]
+            now = time.monotonic()
+            entries = []
+            for entry in self.transcript_data["You"] + self.transcript_data["Speaker"]:
+                entry_copy = entry.copy()
+                entry_copy["status"] = self._entry_status_locked(entry, now)
+                entries.append(entry_copy)
         return sorted(entries, key=lambda x: x["timestamp"])[-MAX_PHRASES:]
 
     def get_transcript(self):
@@ -351,6 +352,64 @@ class AudioTranscriber:
         self.next_transcript_id += 1
         return entry
 
+    def _ensure_active_entry_locked(self, who_spoke, time_spoken):
+        segment = self.segment_state[who_spoke]
+        transcript = self.transcript_data[who_spoke]
+        source_info = self.audio_sources[who_spoke]
+
+        if (
+            source_info.get("new_phrase")
+            and source_info.get("last_spoken") is not None
+            and not segment["is_finalized"]
+            and segment["active_card_id"] is not None
+        ):
+            active_entry = self._find_entry(segment["active_card_id"])
+            if active_entry and self._is_meaningful_text(active_entry.get("original")):
+                segment["active_card_id"] = None
+                segment["buffer"] = ""
+                segment["is_finalized"] = True
+                source_info["active_entry_id"] = None
+
+        if segment["is_finalized"] or segment["active_card_id"] is None:
+            entry = self._new_entry(who_spoke, "", time_spoken)
+            transcript.append(entry)
+            segment["active_card_id"] = entry["id"]
+            segment["buffer"] = ""
+            segment["is_finalized"] = False
+            if len(transcript) > MAX_PHRASES:
+                transcript.pop(0)
+            return entry
+
+        entry = self._find_entry(segment["active_card_id"])
+        if entry is None:
+            entry = self._new_entry(who_spoke, "", time_spoken)
+            transcript.append(entry)
+            segment["active_card_id"] = entry["id"]
+            segment["buffer"] = ""
+            segment["is_finalized"] = False
+        return entry
+
+    def _entry_status_locked(self, entry, now):
+        translation_state = entry.get("translation_state")
+        if translation_state == "translating":
+            return "Menerjemahkan"
+        if translation_state == "done":
+            return "Selesai"
+
+        segment = self.segment_state.get(entry["speaker"])
+        if segment and segment.get("active_card_id") == entry["id"]:
+            last_activity = segment.get("last_activity") or self.last_audio_activity.get(entry["speaker"])
+            if segment.get("is_transcribing"):
+                started_at = segment.get("transcribing_started_at") or now
+                if now - started_at < PROCESSING_STATUS_DELAY:
+                    return "Sedang berbicara"
+                return "Sedang memproses teks"
+            if last_activity and now - last_activity <= SPEAKING_STATUS_SECONDS:
+                return "Sedang berbicara"
+            return "Teks siap diterjemahkan"
+
+        return "Teks siap diterjemahkan"
+
     @staticmethod
     def _new_segment_state():
         return {
@@ -361,11 +420,120 @@ class AudioTranscriber:
             "timer_generation": 0,
             "is_finalized": True,
             "is_transcribing": False,
+            "transcribing_started_at": 0.0,
         }
 
-    def _set_segment_transcribing(self, who_spoke, value):
+    def _set_segment_transcribing(self, who_spoke, value, time_spoken=None):
         with self.lock:
-            self.segment_state[who_spoke]["is_transcribing"] = value
+            segment = self.segment_state[who_spoke]
+            segment["is_transcribing"] = value
+            if value and time_spoken is not None:
+                started_at = time.monotonic()
+                self._ensure_active_entry_locked(who_spoke, time_spoken)
+                segment["last_activity"] = started_at
+                segment["transcribing_started_at"] = started_at
+                self._cancel_translation_timer_locked(who_spoke)
+                self._bump_revision()
+                self._schedule_processing_status_refresh(who_spoke, started_at)
+            elif not value:
+                segment["transcribing_started_at"] = 0.0
+                self._bump_revision()
+                self._schedule_status_refresh(who_spoke, segment.get("last_activity"))
+
+    def _schedule_processing_status_refresh(self, who_spoke, started_at):
+        timer = threading.Timer(PROCESSING_STATUS_DELAY, self._refresh_processing_status_if_active, args=(who_spoke, started_at))
+        timer.daemon = True
+        timer.start()
+
+    def _refresh_processing_status_if_active(self, who_spoke, started_at):
+        with self.lock:
+            segment = self.segment_state[who_spoke]
+            if segment.get("is_transcribing") and segment.get("transcribing_started_at") == started_at:
+                self._bump_revision()
+
+    def _schedule_status_refresh(self, who_spoke, last_activity):
+        if not last_activity:
+            return
+
+        timer = threading.Timer(SPEAKING_STATUS_SECONDS, self._refresh_status_if_idle, args=(who_spoke, last_activity))
+        timer.daemon = True
+        timer.start()
+
+    def _refresh_status_if_idle(self, who_spoke, last_activity):
+        with self.lock:
+            segment = self.segment_state[who_spoke]
+            if (
+                segment.get("active_card_id") is not None
+                and not segment.get("is_transcribing")
+                and segment.get("last_activity") == last_activity
+            ):
+                self._bump_revision()
+
+    def finish_active_segments(self):
+        ready_translations = []
+        with self.lock:
+            for who_spoke in ("You", "Speaker"):
+                ready_translation = self._finalize_segment_locked(who_spoke, force=True)
+                if ready_translation:
+                    ready_translations.append(ready_translation)
+
+        for entry_id, original in ready_translations:
+            self._queue_translation(entry_id, original)
+
+        return len(ready_translations)
+
+    def finish_entry(self, entry_id):
+        ready_translation = None
+        with self.lock:
+            entry = self._find_entry(entry_id)
+            if not entry:
+                return 0
+
+            original = self._normalize_text(entry["original"])
+            if not self._is_meaningful_text(original):
+                return 0
+
+            if entry.get("translation_state") == "translating":
+                return 0
+            if entry.get("translation_state") == "done" and entry.get("translated_original") == original:
+                return 0
+
+            who_spoke = entry["speaker"]
+            segment = self.segment_state[who_spoke]
+            if segment.get("active_card_id") == entry_id:
+                ready_translation = self._finalize_segment_locked(who_spoke, force=True)
+            else:
+                entry["translation"] = TRANSLATION_RUNNING_TEXT
+                entry["translation_pending"] = True
+                entry["translation_state"] = "translating"
+                entry["translation_requested_for"] = original
+                ready_translation = (entry_id, original)
+                self._bump_revision()
+
+        if ready_translation:
+            self._queue_translation(*ready_translation)
+            return 1
+        return 0
+
+    def _cancel_translation_timer_locked(self, who_spoke):
+        segment = self.segment_state[who_spoke]
+        timer = segment.get("translation_timer")
+        if timer:
+            timer.cancel()
+        segment["translation_timer"] = None
+        segment["timer_generation"] += 1
+
+    def _discard_empty_active_entry(self, who_spoke):
+        with self.lock:
+            segment = self.segment_state[who_spoke]
+            entry_id = segment.get("active_card_id")
+            entry = self._find_entry(entry_id) if entry_id else None
+            if not entry or self._normalize_text(entry.get("original")):
+                return
+
+            self._remove_entry_locked(entry_id)
+            self._reset_segment_locked(who_spoke)
+            self._bump_revision()
 
     def _schedule_translation_timer_locked(self, who_spoke, delay=TRANSLATION_SILENCE_DELAY):
         segment = self.segment_state[who_spoke]
@@ -380,52 +548,54 @@ class AudioTranscriber:
         segment["translation_timer"] = timer
         timer.start()
 
-    def finalize_segment(self, who_spoke, generation=None):
-        ready_translation = None
-
+    def finalize_segment(self, who_spoke, generation=None, force=False):
         with self.lock:
-            segment = self.segment_state[who_spoke]
-            if generation is not None and generation != segment["timer_generation"]:
-                return
-            if segment["is_finalized"] or segment["active_card_id"] is None:
-                return
+            ready_translation = self._finalize_segment_locked(who_spoke, generation, force)
 
+        if ready_translation:
+            self._queue_translation(*ready_translation)
+
+    def _finalize_segment_locked(self, who_spoke, generation=None, force=False):
+        segment = self.segment_state[who_spoke]
+        if generation is not None and generation != segment["timer_generation"]:
+            return None
+        if segment["is_finalized"] or segment["active_card_id"] is None:
+            return None
+
+        if not force:
             now = time.monotonic()
             elapsed = now - segment["last_activity"]
             if segment["is_transcribing"]:
                 self._schedule_translation_timer_locked(who_spoke, delay=0.25)
-                return
+                return None
             if elapsed < TRANSLATION_SILENCE_DELAY:
                 self._schedule_translation_timer_locked(
                     who_spoke,
                     delay=max(0.1, TRANSLATION_SILENCE_DELAY - elapsed),
                 )
-                return
+                return None
 
-            entry_id = segment["active_card_id"]
-            full_text = self._normalize_text(segment["buffer"])
-            entry = self._find_entry(entry_id)
-            if not entry:
-                self._reset_segment_locked(who_spoke)
-                return
+        entry_id = segment["active_card_id"]
+        full_text = self._normalize_text(segment["buffer"])
+        entry = self._find_entry(entry_id)
+        if not entry:
+            self._reset_segment_locked(who_spoke)
+            return None
 
-            if not self._is_meaningful_text(full_text):
-                self._remove_entry_locked(entry_id)
-                self._reset_segment_locked(who_spoke)
-                self._bump_revision()
-                return
-
-            entry["original"] = full_text
-            entry["translation"] = TRANSLATION_RUNNING_TEXT
-            entry["translation_pending"] = True
-            entry["translation_state"] = "translating"
-            entry["translation_requested_for"] = full_text
-            self._reset_segment_locked(who_spoke, keep_transcribing=True)
-            ready_translation = (entry_id, full_text)
+        if not self._is_meaningful_text(full_text):
+            self._remove_entry_locked(entry_id)
+            self._reset_segment_locked(who_spoke)
             self._bump_revision()
+            return None
 
-        if ready_translation:
-            self._queue_translation(*ready_translation)
+        entry["original"] = full_text
+        entry["translation"] = TRANSLATION_RUNNING_TEXT
+        entry["translation_pending"] = True
+        entry["translation_state"] = "translating"
+        entry["translation_requested_for"] = full_text
+        self._reset_segment_locked(who_spoke, keep_transcribing=True)
+        self._bump_revision()
+        return entry_id, full_text
 
     def _reset_segment_locked(self, who_spoke, keep_transcribing=False):
         segment = self.segment_state[who_spoke]
@@ -442,6 +612,7 @@ class AudioTranscriber:
                 "translation_timer": None,
                 "is_finalized": True,
                 "is_transcribing": is_transcribing,
+                "transcribing_started_at": segment.get("transcribing_started_at") if is_transcribing else 0.0,
             }
         )
         self.audio_sources[who_spoke]["active_entry_id"] = None
@@ -533,12 +704,32 @@ class AudioTranscriber:
             return True
 
         rms = self._audio_rms(who_spoke, data)
-        if rms < MIN_AUDIO_RMS:
+        min_rms = self._min_audio_rms(who_spoke)
+        if rms < min_rms:
             if self.debug:
-                print(f"[DEBUG] Skipping {who_spoke}: likely silence/noise (rms={rms}).")
+                print(f"[DEBUG] Skipping {who_spoke}: likely silence/noise (rms={rms}, min={min_rms}).")
             return True
 
         return False
+
+    def _prepare_audio_sample(self, who_spoke, data):
+        if not ENABLE_AUDIO_NORMALIZATION or not data:
+            return data
+
+        sample_width = self.audio_sources[who_spoke]["sample_width"]
+        try:
+            average = audioop.avg(data, sample_width)
+            cleaned = audioop.bias(data, sample_width, -average) if average else data
+            rms = audioop.rms(cleaned, sample_width)
+            if rms <= 0:
+                return cleaned
+
+            gain = min(MAX_AUDIO_GAIN, TARGET_AUDIO_RMS / rms)
+            if gain > 1.05:
+                return audioop.mul(cleaned, sample_width, gain)
+            return cleaned
+        except audioop.error:
+            return data
 
     def _audio_duration_seconds(self, who_spoke, data):
         if not data:
@@ -559,6 +750,12 @@ class AudioTranscriber:
             return audioop.rms(data, sample_width)
         except audioop.error:
             return 0
+
+    @staticmethod
+    def _min_audio_rms(who_spoke):
+        if who_spoke == "Speaker":
+            return MIN_SPEAKER_AUDIO_RMS
+        return MIN_MIC_AUDIO_RMS
 
     @staticmethod
     def _normalize_text(text):
