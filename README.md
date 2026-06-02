@@ -152,6 +152,80 @@ Run API transcription mode:
 
 API mode is recommended when you need better multilingual support, faster transcription, and Indonesian translation.
 
+## Documentation
+
+### System Flow
+
+```mermaid
+flowchart TD
+    mic["Microphone input"] --> mic_recorder["DefaultMicRecorder"]
+    speaker["System speaker output"] --> speaker_recorder["DefaultSpeakerRecorder via WASAPI loopback"]
+
+    mic_recorder --> mic_queue["Mic audio queue"]
+    speaker_recorder --> speaker_queue["Speaker audio queue"]
+
+    mic_queue --> transcriber["AudioTranscriber"]
+    speaker_queue --> transcriber
+
+    transcriber --> filter["Filter short or quiet audio"]
+    filter --> cleanup["Light audio normalization"]
+    cleanup --> model_router["TranscriberModels"]
+
+    model_router --> local_model["Local Faster Whisper"]
+    model_router --> api_model["Groq or OpenAI-compatible API"]
+
+    local_model --> transcript_state["Transcript state"]
+    api_model --> transcript_state
+
+    transcript_state --> ui["CustomTkinter transcript card"]
+    ui --> finish["User clicks Selesai"]
+    finish --> translation_queue["Background translation queue"]
+    translation_queue --> translation_model["Groq chat translation model"]
+    translation_model --> ui
+```
+
+### Realtime Transcript Flow
+
+```mermaid
+sequenceDiagram
+    participant Audio as "Mic or Speaker"
+    participant Recorder as "AudioRecorder.py"
+    participant Queue as "Audio queue"
+    participant Transcriber as "AudioTranscriber.py"
+    participant Model as "TranscriberModels.py"
+    participant UI as "main.py UI"
+
+    Audio->>Recorder: Voice is detected
+    Recorder->>Queue: Push short audio chunk
+    Queue->>Transcriber: Drain pending chunks
+    Transcriber->>UI: Show speaking status
+    Transcriber->>Transcriber: Skip noise or very short audio
+    Transcriber->>Model: Send cleaned WAV chunk
+    Model-->>Transcriber: Return original transcript text
+    Transcriber->>Transcriber: Merge chunk into active segment
+    Transcriber->>UI: Update active card only
+    UI-->>UI: Show translation placeholder
+    UI->>Transcriber: User clicks Selesai
+    Transcriber->>Model: Translate active transcript only
+    Model-->>Transcriber: Indonesian translation
+    Transcriber->>UI: Update the same card
+```
+
+### UI State Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> Waiting: No transcript yet
+    Waiting --> Speaking: Audio chunk detected
+    Speaking --> Processing: Chunk is sent to transcription model
+    Processing --> Ready: Original text is available
+    Ready --> Translating: User clicks Selesai
+    Translating --> Done: Translation returned
+    Ready --> Speaking: More audio in same segment
+    Done --> Speaking: New phrase starts
+    Done --> [*]: Clear Transcript
+```
+
 ## How It Works
 
 1. `AudioRecorder.py` captures microphone audio and default speaker loopback audio.
