@@ -15,7 +15,7 @@ The application displays a real-time transcript in a desktop UI and can optional
 - Local transcription mode with Faster Whisper
 - API transcription mode with Groq or another OpenAI-compatible endpoint
 - Optional Indonesian translation for each finalized transcript block
-- Configurable silence delay, phrase timeout, audio filtering, and transcription model
+- Configurable fast/accurate transcription mode, language, prompt context, phrase timeout, audio filtering, and UI refresh
 - Secret-safe local configuration through `.env` or `keys.py`
 - Built-in unit tests for transcript state and API authentication handling
 
@@ -80,6 +80,15 @@ GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
 GROQ_TRANSLATION_MODEL=llama-3.1-8b-instant
 ```
 
+For mode-based model selection, set:
+
+```env
+RTDT_TRANSCRIPTION_MODE=fast
+```
+
+Use `fast` for lower latency (`whisper-large-v3-turbo`) or `accurate` for better accuracy (`whisper-large-v3`).
+When `RTDT_TRANSCRIPTION_MODE` is set, it selects the Groq transcription model. Without it, an explicit `GROQ_TRANSCRIPTION_MODEL` value is used.
+
 OpenAI-compatible endpoint example:
 
 ```env
@@ -101,22 +110,31 @@ Keep real credentials local. `.env` and `keys.py` are ignored by Git and should 
 These values are optional and can be added to `.env` when needed:
 
 ```env
-GROQ_TRANSCRIPTION_LANGUAGE=id
-GROQ_TRANSCRIPTION_TEMPERATURE=0
-GROQ_TRANSCRIPTION_PROMPT=Conversation with technical terms and product names.
+RTDT_TRANSCRIPTION_MODE=fast
+RTDT_TRANSCRIPTION_LANGUAGE=en
+RTDT_TRANSCRIPTION_TEMPERATURE=0
+RTDT_TRANSCRIPTION_PROMPT=This is an English motivational speech. Common words: power of words, adversity, opportunity, weakness, strength, disabled, differently abled, disability.
 
-RTDT_RECORD_TIMEOUT=1.4
-RTDT_PHRASE_TIMEOUT=5.0
-RTDT_PAUSE_THRESHOLD=0.65
-RTDT_MIN_AUDIO_SECONDS=0.45
+RTDT_RECORD_TIMEOUT=1.0
+RTDT_PHRASE_TIMEOUT=3.0
+RTDT_PAUSE_THRESHOLD=0.50
+RTDT_MIN_AUDIO_SECONDS=0.30
 RTDT_MIN_AUDIO_RMS=120
-RTDT_TRANSLATION_SILENCE_DELAY=5.0
+RTDT_MIN_MIC_RMS=120
+RTDT_MIN_SPEAKER_RMS=90
+RTDT_ENABLE_AUDIO_NORMALIZATION=1
+RTDT_TARGET_AUDIO_RMS=800
+RTDT_PRIORITIZE_SPEAKER=1
+RTDT_UI_REFRESH_MS=150
+RTDT_PROCESSING_STATUS_DELAY=0.15
 ```
 
 Model recommendation:
 
 - `whisper-large-v3-turbo` for lower latency
 - `whisper-large-v3` for higher accuracy
+
+Set `RTDT_TRANSCRIPTION_LANGUAGE=auto` to let the provider detect the language. For English video/audio, prefer `en` or `auto`; do not force `id` unless the source audio is Indonesian.
 
 ## Running the Application
 
@@ -189,9 +207,9 @@ ffmpeg -version
 
 The application captures the default Windows speaker output through WASAPI loopback. Set the target output device as the Windows default speaker before starting the app.
 
-### Transcription is delayed
+### Translation is delayed
 
-Transcript blocks are finalized after a silence delay. Lower `RTDT_TRANSLATION_SILENCE_DELAY` and `RTDT_PHRASE_TIMEOUT` for faster updates, or increase them for more stable sentence grouping.
+Translation runs when you click the `Selesai` button. While speaking, the active transcript block keeps updating and the translation field waits for that manual finish action.
 
 ## Security Notes
 
