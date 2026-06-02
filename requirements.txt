@@ -1,0 +1,6 @@
+numpy
+faster-whisper==1.2.1
+openai
+customtkinter
+PyAudioWPatch
+ctranslate2>=4.0,<5
